@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+<title>SVOCM View（アルファ版）</title>
+<script src="https://unpkg.com/compromise"></script>
+<style>
+  body { font-family: -apple-system, 'Hiragino Sans', 'Meiryo', sans-serif; max-width: 1400px; margin: 20px auto; padding: 0 16px; color: #222; }
+  .split { display: flex; gap: 16px; align-items: flex-start; }
+  #poolPanel { flex: 0 0 auto; width: fit-content; }
+  #tablePanel { flex: 0 0 auto; min-width: 0; }
+  #tablePanel table { width: auto; table-layout: auto; }
+  h2 { font-size: 18px; margin-bottom: 4px; }
+  p.note { font-size: 13px; color: #666; margin-top: 0; }
+  textarea { width: 100%; height: 50px; font-size: 15px; padding: 8px; box-sizing: border-box; }
+  .toolbar { margin: 8px 0 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { padding: 6px 12px; font-size: 13px; border: 1px solid #555; background: #fff; border-radius: 4px; cursor: pointer; }
+  button:hover { background: #f0f0f0; }
+  /* 長い文を配置していく間、テーブルまでスクロールしなくてもS/V/O/C/Mへ配置できるよう
+     常に画面上部に固定表示する配置専用バー。選択語があればここをタップするだけで進む。 */
+  #quickBar { position: sticky; top: 0; z-index: 10; background: #fff; padding: 8px 0; margin: 0 0 12px; border-bottom: 1px solid #ddd; }
+  button.svocm-btn { font-weight: bold; min-width: 40px; background: #eaf4ff; border-color: #6699cc; }
+  button.svocm-btn:hover { background: #d5e9fb; }
+  /* ボタン群のまとめ用spanはレイアウト上は存在しない扱いにして、
+     親(.toolbar)のflexに各ボタンが直接並ぶようにする */
+  #btns5, #btns3 { display: contents; }
+  #modeBar { margin: 0 0 12px; font-size: 13px; }
+  #pool { min-height: 50px; margin-bottom: 8px; overflow-x: auto; }
+  #pool table td { cursor: pointer; }
+  .chip { padding: 4px 10px; background: #fff3cd; border: 1px solid #c9a227; border-radius: 14px; cursor: pointer; font-size: 14px; user-select: none; }
+  .chip.selected { background: #ffd54f; border-color: #b8860b; box-shadow: 0 0 0 2px #b8860b inset; }
+  /* 単語置き場の要点語/所流語 色分け。デフォルトON(body.pool-color-diff)。
+     選択中(.selected)の見た目を上書きしないよう :not(.selected) を付ける。 */
+  body.pool-color-diff .chip.type-satellite:not(.selected){ background: #d7ecf3; border-color: #2c5f6f; }
+  .keyhint { font-size: 12px; color: #777; margin-top: 12px; line-height: 1.6; }
+  .keyhint label { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #999; padding: 6px 8px; font-size: 14px; min-width: 48px; height: 30px; vertical-align: top; }
+  th { background: #eee; }
+  td.rownum, th.rownum { text-align: center; color: #888; background: #f7f7f7; min-width: 0; width: 18px; max-width: 18px; padding: 6px 2px; }
+  tr.active td { background: #eaf4ff; }
+  td.cell { position: relative; cursor: pointer; }
+  .cellword { display: inline-block; background: #e3f2e1; border: 1px solid #7ab87a; border-radius: 10px; padding: 1px 6px; margin: 1px; font-size: 13px; cursor: pointer; }
+  .cellword.selected { background: #a5d6a7; border-color: #2e7d32; box-shadow: 0 0 0 2px #2e7d32 inset; }
+  #status { font-size: 13px; color: #2a7; margin-left: 8px; opacity: 0; transition: opacity 0.3s; }
+  #newRowBtnWrap { margin-top: 8px; }
+  #newRowBtnWrap button { font-size: 15px; padding: 8px 18px; }
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* ---- スマホ幅向けレスポンシブ調整 ----
+     ・pool(単語置き場)とtable(SVOCM本体)を横並びから縦積みに変更
+     ・ボタン/チップ/セルをタップしやすい大きさに拡大
+     ・textareaはfont-size 16px以上にしてiOSの自動ズームを防ぐ */
+  @media (max-width: 700px){
+    body { margin: 10px auto; padding: 0 6px; }
+    h2 { font-size: 17px; }
+    p.note { font-size: 12.5px; }
+    .split { flex-direction: column; }
+    #poolPanel, #tablePanel { width: 100%; }
+    #pool table { width: 100%; }
+    textarea { font-size: 16px; height: 64px; }
+    .toolbar { gap: 10px; }
+    button { padding: 10px 14px; font-size: 15px; }
+    #newRowBtnWrap button { font-size: 16px; padding: 12px 20px; width: 100%; }
+    .chip { padding: 8px 14px; font-size: 16px; }
+    th, td { padding: 6px 3px; font-size: 14px; min-width: 28px; height: 34px; }
+    td.rownum, th.rownum { width: 14px; max-width: 14px; padding: 6px 2px; }
+    .cellword { padding: 3px 6px; font-size: 14px; }
+    .keyhint { font-size: 13px; }
+    #quickBar { gap: 8px; }
+    button.svocm-btn { font-size: 20px; padding: 10px 0; min-width: 44px; flex: 1 1 0; }
+    #quickBar button:not(.svocm-btn) { font-size: 14px; padding: 10px 12px; }
+  }
+</style>
+</head>
+<body class="pool-color-diff">
+<div id="editorRoot">
+
+<h2>SVOCM View（アルファ版）</h2>
+<p class="note">英文をSVOCM（主語・動詞・目的語・補語・修飾語）の観点で表に振り分けて可視化するツールです。原文をペースト→「分割」。単語チップは連続クリックで複数選択できます（もう一度クリックで解除）。単語置き場では、セル内のどこをクリックしても中の単語が選択されます。選んだ状態でキー(S/V/O/C/M)を押すか、表のセルをクリックすると、そこに移動します。配置済みの単語もクリックで選択でき、同様に別のセルや単語置き場へ移動できます。</p>
+
+<textarea id="input" placeholder="ここに英文を貼り付け"></textarea>
+<div class="toolbar">
+  <button onclick="tokenize()">分割</button>
+  <button onclick="mergeSelected()">選択を結合</button>
+  <button onclick="clearSelection()">選択解除</button>
+  <button onclick="moveSelectedToPool()">選択を単語置き場へ戻す</button>
+  <button onclick="insertRowAfterActive()">行を挿入（現在行の下）</button>
+  <button onclick="deleteActiveRow()">行を削除</button>
+  <button onclick="undo()">元に戻す</button>
+  <button onclick="copyTSV()">Excel用にコピー</button>
+  <span id="status">コピーしました</span>
+</div>
+<div class="toolbar">
+  <button onclick="saveCurrentTable()">この表を保存</button>
+  <button onclick="showArchive()">記録を見る</button>
+  <button onclick="exportToPC()">PCへ保存</button>
+  <button onclick="document.getElementById('importFile').click()">PCから読み込み</button>
+  <input type="file" id="importFile" accept="application/json" style="display:none" onchange="importFromPC(event)">
+  <span id="saveStatus" style="font-size:13px;color:#2a7;opacity:0;transition:opacity 0.3s;">保存しました</span>
+</div>
+
+<div id="quickBar" class="toolbar">
+  <span id="activeRowLabel" class="dim-label" style="margin-left:0;">配置先: 1行目</span>
+  <span id="btns5">
+    <button class="svocm-btn" onclick="quickPlace('S')">S</button>
+    <button class="svocm-btn" onclick="quickPlace('V')">V</button>
+    <button class="svocm-btn" onclick="quickPlace('O')">O</button>
+    <button class="svocm-btn" onclick="quickPlace('C')">C</button>
+    <button class="svocm-btn" onclick="quickPlace('M')">M</button>
+  </span>
+  <span id="btns3" style="display:none;">
+    <button class="svocm-btn" onclick="quickPlace('SOC')">S/O/C</button>
+    <button class="svocm-btn" onclick="quickPlace('V')">V</button>
+    <button class="svocm-btn" onclick="quickPlace('M')">M</button>
+  </span>
+  <button onclick="newRow()">＋行</button>
+</div>
+<div class="toolbar" id="modeBar">
+  <span class="dim-label" style="margin-left:0;">表示形式:</span>
+  <label><input type="radio" name="viewMode" value="5" checked onchange="setViewMode('5')">5列 (S V O C M)</label>
+  <label><input type="radio" name="viewMode" value="3" onchange="setViewMode('3')">3列 (S/O/C V M・冠詞はM)</label>
+</div>
+<div class="split">
+  <div id="poolPanel">
+    <div id="pool"></div>
+  </div>
+  <div id="tablePanel">
+<div class="table-scroll">
+<table>
+  <thead id="thead"></thead>
+  <tbody id="tbody"></tbody>
+</table>
+</div>
+<div id="newRowBtnWrap">
+  <button onclick="newRow()">＋ 新しい行を追加</button>
+</div>
+  </div>
+</div>
+
+<div class="keyhint">
+  <label><input type="checkbox" id="autoSelectToggle" checked onchange="autoSelectNext = this.checked;">配置後、次の語を自動選択する</label>
+  <label style="margin-left:16px;"><input type="checkbox" id="poolColorToggle" checked onchange="document.body.classList.toggle('pool-color-diff', this.checked);">単語置き場を要点語/所流語で色分けする(既定:色分けする)</label><br>
+  選択中に S / V / O / C / M キーでアクティブ行のその列へ。数字キー・テンキーは見えている列の順で、5列表示なら1〜5＝S/V/O/C/M、3列表示なら1〜3＝S/O/C・V・M。
+  Shift+キーで改行せず同じ行に強制配置。Alt+キーで改行して次の行に強制配置。
+  セルへの直接クリックは常にそのセルへ直接配置（自動改行なし）。
+  ↓キーで単語置き場の次の語を選択に追加（同時選択）、↑キーで追加分を1つ取り消し。Enterキーで新しい行を追加。
+  画面上部の「配置先」表示とS/V/O/C/Mボタンは、表までスクロールしなくても選択中の語をアクティブ行へ配置できます（新しい行は「＋行」）。
+  表示形式は5列と3列を切り替えられ、切り替え時に配置内容は自動で変換されます（3列では冠詞がM列に移り、5列に戻すと元の名詞句に戻ります）。
+  3列表示でもキーボードのS/O/Cキーで役割を明示できます（明示した語はその役割のまま5列へ戻り、S/O/Cボタンで置いた語は5列へ戻すとき文の流れから判定し直されます）。
+</div>
+</div>
+
+<div id="archiveRoot" style="display:none; max-width:900px; margin:20px auto; padding:0 16px; font-family:-apple-system,'Hiragino Sans',sans-serif;">
+  <h2>SVOCM 記録ビュー</h2>
+  <div class="toolbar">
+    <button onclick="hideArchive()">← 編集に戻る</button>
+    <button onclick="exportToPC()">PCへ保存</button>
+    <button onclick="document.getElementById('importFileArchive').click()">PCから読み込み</button>
+    <input type="file" id="importFileArchive" accept="application/json" style="display:none" onchange="importFromPC(event)">
+  </div>
+  <div id="archiveList"></div>
+</div>
+
+<script>
+const SATELLITE_OVERRIDE = new Set([
+  "there","here","now","then","why","where","when","how","since","while","although",
+  "though","whereas","notwithstanding","including","despite","per","via",
+  "upon","onto","off","out","up","down","away","back","forward",
+  "all","no","any","some","each","every","both","none","either","neither",
+  "therefore","however","moreover","nevertheless","consequently",
+  "furthermore","thus","hence","otherwise",
+  "do","does","did","have","has","had",
+  "go","goes","going","went","gone",
+  "like","likes","liked","liking",
+  "further","still",
+  "somewhat","somehow","somewhere","anywhere","everywhere","nowhere",
+  "who","whom","whose","which","what",
+  "at"
+]);
+const KEYWORD_OVERRIDE = new Set([
+  "more","most","many","much","few","fewer","several","less","least","enough",
+  "first","second","third","also","just","only","really",
+  "very","quite","rather","so","particularly",
+  "someone","anyone","everyone","somebody","anybody","everybody",
+  "something","anything","everything","nothing"
+]);
+const SATELLITE_TAGS = new Set([
+  "Determiner","Preposition","Conjunction","Pronoun","Copula","Modal",
+  "Auxiliary","Negative"
+]);
+function classify(chip){
+  const w = (chip.text || '').toLowerCase().replace(/[^a-z']/g, '');
+  if (SATELLITE_OVERRIDE.has(w)) return 'satellite';
+  if (KEYWORD_OVERRIDE.has(w)) return 'keyword';
+  const tags = chip.tags || [];
+  for (const t of tags){ if (SATELLITE_TAGS.has(t)) return 'satellite'; }
+  return 'keyword';
+}
+
+const COLS = ['S','V','O','C','M'];   // 内部データ上の役割は常にこの5つ（3列表示でも保持する）
+let viewMode = '5';                   // '5' = S V O C M ／ '3' = S/O/C V M
+const ARTICLES = new Set(['a','an','the']);
+const CLAUSE_BREAKERS = new Set(['and','but','or','so','yet','nor','because','when','if','that','while','although']);
+function normWord(text){ return String(text||'').toLowerCase().replace(/[^a-z']/g,''); }
+function isArticle(text){ return ARTICLES.has(normWord(text)); }
+
+// 表示上の列。3列表示ではS/O/Cを1列にまとめて見せる（役割データ自体は保持）
+function viewCols(){ return viewMode === '3' ? ['SOC','V','M'] : COLS.slice(); }
+function rolesOfViewCol(vc){ return vc === 'SOC' ? ['S','O','C'] : [vc]; }
+// 自動改行判定に使う「列の進み具合」。3列表示ではS/O/Cが同じ位置になる
+function colPos(col){ return viewMode === '3' ? ({S:0,O:0,C:0,V:1,M:2})[col] : COLS.indexOf(col); }
+// 3列表示で「S/O/C列」へ置くとき、その行の状況からどの役割として記録するかを決める。
+// ここで決まる役割はあくまで仮のもので、チップに autoRole 印を付けておき、
+// 5列へ変換する際に文の流れから改めて判定し直す（3列の図はS/O/Cの区別を持たないため）。
+// キーボードのS/O/Cキーで明示的に置いた語には印を付けず、その役割をそのまま保持する。
+function resolveRole(col, row){
+  if (col !== 'SOC') return col;
+  if (row.C.length) return 'C';
+  if (row.O.length) return 'O';
+  if (row.V.length) return 'O';   // 動詞の後ろの名詞句は仮に目的語とみなす
+  return 'S';
+}
+
+let chips = [];       // pool: {id, text, merged?}
+let rows = [];        // [{S:[{id,text}], V:[...], O:[...], C:[...], M:[...]}]
+let activeRow = 0;
+let selectedChipIds = new Set();
+let history = [];
+let chipCounter = 0;
+let autoSelectNext = true; // 配置後に次の語を自動選択するか（デフォルトON）
+
+function emptyRow(){ return {S:[], V:[], O:[], C:[], M:[]}; }
+
+// 配置操作の後、設定が有効なら単語置き場の先頭語を自動的に選択状態にする
+function applyAutoSelectNext(){
+  selectedChipIds.clear();
+  if (autoSelectNext && chips.length > 0){
+    selectedChipIds.add(chips[0].id);
+  }
+}
+
+function snapshot(){
+  history.push(JSON.stringify({chips, rows, activeRow}));
+  if (history.length > 50) history.shift();
+}
+function undo(){
+  if (history.length === 0) return;
+  const s = JSON.parse(history.pop());
+  chips = s.chips; rows = s.rows; activeRow = s.activeRow;
+  selectedChipIds.clear();
+  render();
+}
+
+function tokenize(){
+  snapshot();
+  const text = document.getElementById('input').value.trim();
+  if (!text) return;
+  let words = [];
+  if (typeof nlp !== 'undefined'){
+    // compromise.jsでterm分割（短縮形の展開、句読点の扱いをSkimViewと揃える）
+    const doc = nlp(text);
+    const json = doc.json();
+    let terms = [];
+    json.forEach(sentence => { terms = terms.concat(sentence.terms); });
+    // 短縮形（I'm / you're / that's / don't 等）はcompromise内部では2形態素に
+    // 分解されているが、2つ目の形態素はtextが空文字でimplicitのみを持つ
+    // 「隠れ形態素」になるため、そのままではチップが1つにまとまってしまう。
+    // アポストロフィの位置で見た目上も2チップに分割する。
+    for (let i = 0; i < terms.length; i++){
+      const term = terms[i];
+      const next = terms[i+1];
+      if (term.text && term.text.indexOf("'") !== -1 && next && next.text === '' && next.implicit){
+        // don't/isn't/can't等の否定融合形はn't境界（末尾3文字）で切る。
+        // not/n'tはSVOCM上M列に一意に配置される独立要素のため、
+        // "'t"のような不完全な断片ではなく"n't"として綺麗に切り出す。
+        let firstPart, secondPart;
+        if (/n't$/i.test(term.text)){
+          firstPart = term.text.slice(0, -3);
+          secondPart = term.text.slice(-3);
+        } else {
+          const apIdx = term.text.indexOf("'");
+          firstPart = term.text.slice(0, apIdx);
+          secondPart = term.text.slice(apIdx);
+        }
+        const firstText = (term.pre||'').trim() + firstPart;
+        const secondText = secondPart + (next.post||'').trim();
+        if (firstText.trim() !== '') words.push({text: firstText, tags: term.tags || []});
+        if (secondText.trim() !== '') words.push({text: secondText, tags: next.tags || []});
+        i++; // 隠れ形態素の分を読み飛ばす
+        continue;
+      }
+      const w = ((term.pre||'').trim()) + term.text + ((term.post||'').trim());
+      if (w.trim() !== '') words.push({text: w, tags: term.tags || []});
+    }
+  } else {
+    words = text.split(/\s+/).filter(w => w.length > 0).map(w => ({text: w, tags: []}));
+  }
+  chips = words.map(w => ({id: 'c'+(chipCounter++), text: w.text, tags: w.tags}));
+  rows = [emptyRow()];
+  activeRow = 0;
+  // 分割直後は最初の一語をあらかじめ選択状態にしておく（自動選択が有効な場合）
+  selectedChipIds.clear();
+  if (autoSelectNext && chips.length > 0) selectedChipIds.add(chips[0].id);
+  render();
+}
+
+function newRow(){
+  snapshot();
+  rows.push(emptyRow());
+  activeRow = rows.length - 1;
+  render();
+}
+
+/* ---------- 5列 ⇄ 3列 の相互変換 ----------
+   内部データは常に S/V/O/C/M の役割を保持しているので、表示を切り替えるときは
+   「セルの並び（読み順）を、その表示の列順に沿って行に流し直す」だけでよい。
+   冠詞だけは扱いが違うので、その変換をここで吸収する。
+     5列→3列：S/O/C の中にある冠詞を、その位置で独立したMセルとして切り出す
+     3列→5列：Mセルの末尾にある冠詞を、直後の名詞句（S/O/C）の先頭に戻す
+   行の分け方は「列が前に進んでいる間は同じ行、進まなくなったら改行」。 */
+function flattenCells(){
+  const cells = [];
+  rows.forEach(row => {
+    if (viewMode === '3'){
+      // 3列表示ではS/O/Cは1つのセルに見えているので、まとめて1セル扱いにする
+      // （内訳は parts に残し、明示指定された役割を失わないようにする）
+      const parts = [];
+      ['S','O','C'].forEach(c => { if (row[c].length) parts.push({col: c, chips: row[c].slice()}); });
+      if (parts.length) cells.push({col: 'SOC', parts});
+      if (row.V.length) cells.push({col: 'V', chips: row.V.slice()});
+      if (row.M.length) cells.push({col: 'M', chips: row.M.slice()});
+    } else {
+      COLS.forEach(col => { if (row[col].length) cells.push({col, chips: row[col].slice()}); });
+    }
+  });
+  return cells;
+}
+
+// 5列→3列：S/O/C内の冠詞を、その位置で独立したMセルとして切り出す
+function toThreeColSeq(cells){
+  const seq = [];
+  cells.forEach(cell => {
+    if (['S','O','C'].includes(cell.col)){
+      let buf = [];
+      cell.chips.forEach(ch => {
+        if (isArticle(ch.text)){
+          if (buf.length){ seq.push({col: cell.col, chips: buf}); buf = []; }
+          seq.push({col: 'M', chips: [ch]});
+        } else buf.push(ch);
+      });
+      if (buf.length) seq.push({col: cell.col, chips: buf});
+    } else {
+      seq.push({col: cell.col, chips: cell.chips.slice()});
+    }
+  });
+  return seq;
+}
+
+// 3列→5列：Mセル末尾の冠詞を直後の名詞句へ戻し、S/O/Cの役割を文の流れから決め直す。
+// 3列の図はS/O/Cを区別しないので、仮の役割(autoRole付き)は捨てて付け直す。
+// 動詞より前の名詞句はS、動詞より後ろはOとする（補語Cは自動判別できないため、
+// 必要なら5列表示にしてからCキーで直せばよい）。
+function toFiveColSeq(cells){
+  for (let i = 0; i < cells.length - 1; i++){
+    const cur = cells[i], next = cells[i+1];
+    if (cur.col !== 'M' || next.col !== 'SOC') continue;
+    while (cur.chips.length && isArticle(cur.chips[cur.chips.length - 1].text)){
+      const art = cur.chips.pop();
+      art.autoRole = true;   // 名詞句に吸収される冠詞は、その名詞句の役割に従わせる
+      next.parts[0].chips.unshift(art);
+    }
+  }
+  const seq = [];
+  let phase = 'preV';
+  cells.forEach(cell => {
+    if (cell.col === 'SOC'){
+      cell.parts.forEach(part => {
+        if (!part.chips.length) return;
+        const allAuto = part.chips.every(ch => ch.autoRole);
+        const role = allAuto ? (phase === 'preV' ? 'S' : 'O') : part.col;
+        seq.push({col: role, chips: part.chips});
+      });
+      return;
+    }
+    if (!cell.chips.length) return;           // 冠詞を戻して空になったMセルは捨てる
+    if (cell.col === 'V') phase = 'postV';
+    // 等位接続詞の後ろは新しい節が始まるので、次の名詞句は主語とみなす
+    if (cell.col === 'M' && cell.chips.some(ch => CLAUSE_BREAKERS.has(normWord(ch.text)))) phase = 'preV';
+    seq.push({col: cell.col, chips: cell.chips.slice()});
+  });
+  // 連続する同じ役割の名詞セルは1つにまとめる
+  const merged = [];
+  seq.forEach(c => {
+    const last = merged[merged.length - 1];
+    if (last && last.col === c.col && ['S','O','C'].includes(c.col)) last.chips.push(...c.chips);
+    else merged.push({col: c.col, chips: c.chips.slice()});
+  });
+  return merged;
+}
+
+function reflowRows(targetMode, cells){
+  const seq = (targetMode === '3') ? toThreeColSeq(cells) : toFiveColSeq(cells);
+
+  const posOf = (col) => targetMode === '3' ? ({S:0,O:0,C:0,V:1,M:2})[col] : COLS.indexOf(col);
+  const newRows = [];
+  let cur = null, lastPos = -1;
+  seq.forEach(cell => {
+    const p = posOf(cell.col);
+    if (!cur || p <= lastPos){ cur = emptyRow(); newRows.push(cur); }
+    cur[cell.col].push(...cell.chips);
+    lastPos = p;
+  });
+  if (newRows.length === 0) newRows.push(emptyRow());
+  rows = newRows;
+  activeRow = rows.length - 1;
+}
+
+function setViewMode(m){
+  if (m === viewMode) return;
+  snapshot();
+  // 表の読み取りは必ず「切り替え前の形式」で行う。先にviewModeを変えてしまうと
+  // 変換前の表を変換後の形式として誤って読み取ってしまう。
+  const cells = flattenCells();
+  viewMode = m;
+  reflowRows(m, cells);
+  render();
+}
+
+// アクティブ行の直後（行と行の間）に空行を挿入する。
+// 同格の名詞などを後から複数行に分けたい場合に使う。
+function insertRowAfterActive(){
+  snapshot();
+  rows.splice(activeRow + 1, 0, emptyRow());
+  activeRow = activeRow + 1;
+  render();
+}
+
+function deleteActiveRow(){
+  if (rows.length <= 1) return;
+  snapshot();
+  // 削除する行に残っていたチップは単語置き場に戻す
+  const row = rows[activeRow];
+  COLS.forEach(col => { row[col].forEach(ch => chips.push(ch)); });
+  rows.splice(activeRow, 1);
+  activeRow = Math.max(0, activeRow - 1);
+  render();
+}
+
+// --- チップの所在探索・削除 ---
+function locateAndRemove(id){
+  let idx = chips.findIndex(c => c.id === id);
+  if (idx !== -1) return chips.splice(idx, 1)[0];
+  for (const row of rows){
+    for (const col of COLS){
+      idx = row[col].findIndex(c => c.id === id);
+      if (idx !== -1) return row[col].splice(idx, 1)[0];
+    }
+  }
+  return null;
+}
+
+function mergeSelected(){
+  if (selectedChipIds.size < 2) return;
+  snapshot();
+  const ids = Array.from(selectedChipIds);
+  // 選択された順ではなく、元の見た目の並び順を保つため、まずpool内の順で拾えるものを拾う
+  const orderedPool = chips.filter(c => ids.includes(c.id));
+  const selectedObjs = orderedPool.length === ids.length
+    ? orderedPool
+    : ids.map(id => chips.find(c => c.id === id)).filter(Boolean);
+  if (selectedObjs.length < 2){
+    // pool以外（セル内）にまたがる選択の結合は対象外とする
+    selectedChipIds.clear();
+    render();
+    return;
+  }
+  const mergedText = selectedObjs.map(c => c.text).join(' ');
+  const firstIndex = chips.findIndex(c => selectedChipIds.has(c.id));
+  chips = chips.filter(c => !selectedChipIds.has(c.id));
+  const newChip = {id: 'c'+(chipCounter++), text: mergedText, merged: true};
+  chips.splice(firstIndex, 0, newChip);
+  selectedChipIds.clear();
+  render();
+}
+
+function splitChip(id){
+  const chip = chips.find(c => c.id === id);
+  if (!chip || !chip.merged) return;
+  snapshot();
+  const words = chip.text.split(/\s+/);
+  const newChips = words.map(w => ({id: 'c'+(chipCounter++), text: w}));
+  const idx = chips.findIndex(c => c.id === id);
+  chips.splice(idx, 1, ...newChips);
+  render();
+}
+
+function colIndex(col){ return COLS.indexOf(col); }
+
+// dest: {type:'pool'} または {type:'cell', rowIdx, col}
+// mode: 'auto'（列順後退規則により必要な場合のみ自動改行）
+//       'sameRow'（改行せず指定のセルへ強制的にそのまま配置）
+//       'newRow'（改行状態を無視して常に新しい行を作り、そこへ配置）
+function moveChipsTo(ids, dest, mode){
+  const objs = ids.map(id => locateAndRemove(id)).filter(Boolean);
+  if (objs.length === 0) return;
+  if (dest.type === 'pool'){
+    chips.push(...objs);
+    return;
+  }
+  let targetRow = dest.rowIdx;
+  let targetCol = dest.col;
+  if (mode === 'newRow'){
+    rows.push(emptyRow());
+    targetRow = rows.length - 1;
+    activeRow = targetRow;
+  } else if (mode !== 'sameRow'){
+    // auto: 列順後退規則 — 次に埋める列が直前に埋めた列より手前なら自動改行
+    const row = rows[targetRow];
+    let lastPos = -1;
+    COLS.forEach(c => { if (row[c].length > 0) lastPos = Math.max(lastPos, colPos(c)); });
+    const p = (targetCol === 'SOC') ? 0 : colPos(targetCol);
+    let needNewRow = (lastPos !== -1 && p < lastPos);
+    // 3列表示でS/O/Cが同じ列に見える場合、既に別の役割の名詞句がある行に足すと
+    // 1つの塊に見えてしまうため改行する（S/O/Cボタン経由なら上の規則で足りる）
+    if (!needNewRow && viewMode === '3' && p === 0 && targetCol !== 'SOC'){
+      const filled = ['S','O','C'].filter(c => row[c].length > 0);
+      if (filled.length > 0 && !filled.includes(targetCol)) needNewRow = true;
+    }
+    if (needNewRow){
+      rows.push(emptyRow());
+      targetRow = rows.length - 1;
+      activeRow = targetRow;
+    }
+  }
+  // 役割は、実際に置かれる行が確定してから決める（改行前の行で判定すると食い違う）
+  const isGeneric = (targetCol === 'SOC');
+  targetCol = resolveRole(targetCol, rows[targetRow]);
+  objs.forEach(ch => {
+    if (isGeneric) ch.autoRole = true;   // 変換時に役割を決め直す対象
+    else delete ch.autoRole;             // 明示指定された役割は保持する
+  });
+  rows[targetRow][targetCol].push(...objs);
+}
+
+function moveSelectedToPool(){
+  if (selectedChipIds.size === 0) return;
+  snapshot();
+  moveChipsTo(Array.from(selectedChipIds), {type:'pool'});
+  selectedChipIds.clear();
+  render();
+}
+
+// テンキーは e.code が Numpad1〜5 になる（Digit1〜5 は最上段の数字キー）。
+// さらにNumLockオフ時はe.keyが'End'や'ArrowDown'等になるため、キー名ではなく
+// e.codeで判定し、矢印キー処理よりも先に評価する必要がある。
+const DIGIT_CODE_TO_COL_5 = {
+  'Digit1':'S','Digit2':'V','Digit3':'O','Digit4':'C','Digit5':'M',
+  'Numpad1':'S','Numpad2':'V','Numpad3':'O','Numpad4':'C','Numpad5':'M'
+};
+// 3列表示では、見えている列の並び（S/O/C・V・M）どおりに数字を割り当てる。
+// 5列表示の割り当てのままだと「3」がO列＝見た目のS/O/C列に入ってしまうため。
+const DIGIT_CODE_TO_COL_3 = {
+  'Digit1':'SOC','Digit2':'V','Digit3':'M',
+  'Numpad1':'SOC','Numpad2':'V','Numpad3':'M'
+};
+function digitCol(code){
+  return (viewMode === '3' ? DIGIT_CODE_TO_COL_3 : DIGIT_CODE_TO_COL_5)[code] || null;
+}
+
+// 単語置き場(二列表示)の並び順で、選択範囲を1語ずつ後ろ/前に伸縮する。
+// ↓：選択中の最後尾の次の語を選択に追加(同時選択)。↑：追加した末尾の語を選択から外す。
+// セル側の選択が混ざっている場合は、単語置き場側の選択だけを対象にするため先にクリアする。
+function extendPoolSelectionNext(){
+  if (chips.length === 0) return;
+  for (const id of Array.from(selectedChipIds)){
+    if (!chips.some(c => c.id === id)) selectedChipIds.delete(id);
+  }
+  let lastIdx = -1;
+  chips.forEach((c, idx) => { if (selectedChipIds.has(c.id) && idx > lastIdx) lastIdx = idx; });
+  const nextIdx = lastIdx + 1;
+  if (nextIdx >= chips.length) return;
+  selectedChipIds.add(chips[nextIdx].id);
+  render();
+}
+function shrinkPoolSelectionPrev(){
+  let lastIdx = -1, lastId = null;
+  chips.forEach((c, idx) => { if (selectedChipIds.has(c.id) && idx > lastIdx){ lastIdx = idx; lastId = c.id; } });
+  if (lastId !== null){ selectedChipIds.delete(lastId); render(); }
+}
+
+document.addEventListener('keydown', (e) => {
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return; // 文字入力中はショートカットを無効化
+
+  // 数字キー／テンキーはe.code優先で先に判定する（NumLockオフ時に矢印扱いされるのを防ぐ）
+  const codeCol = digitCol(e.code);
+  if (codeCol){
+    if (selectedChipIds.size > 0){
+      e.preventDefault();
+      placeSelected(codeCol, e);
+    }
+    return;
+  }
+  if (e.key === 'Enter'){
+    e.preventDefault();
+    newRow();
+    return;
+  }
+  if (e.key === 'ArrowDown'){
+    e.preventDefault();
+    extendPoolSelectionNext();
+    return;
+  }
+  if (e.key === 'ArrowUp'){
+    e.preventDefault();
+    shrinkPoolSelectionPrev();
+    return;
+  }
+  const key = e.key.toUpperCase();
+  if (COLS.includes(key) && selectedChipIds.size > 0){
+    e.preventDefault();
+    placeSelected(key, e);
+  }
+});
+
+// キー操作による配置（Shift=同じ行に強制、Alt=必ず改行）
+function placeSelected(col, e){
+  snapshot();
+  let mode = 'auto';
+  if (e.altKey) mode = 'newRow';
+  else if (e.shiftKey) mode = 'sameRow';
+  moveChipsTo(Array.from(selectedChipIds), {type:'cell', rowIdx: activeRow, col: col}, mode);
+  applyAutoSelectNext();
+  render();
+}
+
+function toggleSelect(id, fromCell){
+  // 配置済みセル内の語を新たに選択する場合、単語置き場側の自動選択語（先頭語）を
+  // 解除する。これにより訂正のためセル内の語を選ぶ際に先頭語との二重選択が起きない。
+  if (fromCell && !selectedChipIds.has(id)){
+    for (const pid of Array.from(selectedChipIds)){
+      if (chips.some(c => c.id === pid)) selectedChipIds.delete(pid);
+    }
+  }
+  if (selectedChipIds.has(id)) selectedChipIds.delete(id);
+  else selectedChipIds.add(id);
+  render();
+}
+
+function clearSelection(){
+  selectedChipIds.clear();
+  render();
+}
+
+// セルをクリック：選択中のチップがあればそこへ直接移動、なければアクティブ行を切り替えるだけ
+function onCellClick(rowIdx, viewCol){
+  if (selectedChipIds.size > 0){
+    snapshot();
+    moveChipsTo(Array.from(selectedChipIds), {type:'cell', rowIdx, col: viewCol}, 'sameRow');
+    applyAutoSelectNext();
+  }
+  activeRow = rowIdx;
+  render();
+}
+
+// 画面上部固定の配置バー：テーブルまでスクロールしなくても、
+// 選択中の語をアクティブ行のその列へ配置できる（キーボードのキーと同じ挙動）。
+function quickPlace(viewCol){
+  if (selectedChipIds.size === 0) return;
+  snapshot();
+  moveChipsTo(Array.from(selectedChipIds), {type:'cell', rowIdx: activeRow, col: viewCol}, 'auto');
+  applyAutoSelectNext();
+  render();
+}
+
+function copyTSV(){
+  const cols = viewCols();
+  const cellText = (r, col) =>
+    rolesOfViewCol(col).map(role => r[role].map(ch => ch.text).join(' ')).filter(s => s !== '').join(' ');
+  const header = ['#', ...cols.map(c => c === 'SOC' ? 'S/O/C' : c)].join('\t');
+  const body = rows.map((r, i) => [i+1, ...cols.map(c => cellText(r, c))].join('\t')).join('\n');
+  const tsv = header + '\n' + body;
+  navigator.clipboard.writeText(tsv).then(() => {
+    const status = document.getElementById('status');
+    status.style.opacity = 1;
+    setTimeout(() => { status.style.opacity = 0; }, 1500);
+  });
+}
+
+function makeChipEl(chip, extraClass, chipType){
+  const el = document.createElement('span');
+  const typeClass = chipType ? (' type-' + chipType) : '';
+  el.className = extraClass + typeClass + (selectedChipIds.has(chip.id) ? ' selected' : '');
+  el.textContent = chip.text;
+  const isCell = extraClass === 'cellword';
+  el.addEventListener('click', (ev) => { ev.stopPropagation(); toggleSelect(chip.id, isCell); });
+  if (chip.merged) el.addEventListener('dblclick', (ev) => { ev.stopPropagation(); splitChip(chip.id); });
+  return el;
+}
+
+// 単語置き場（二列表）の左右列の幅を、両列を通じて最長の語に合わせて揃える。
+// 内枠（セル罫線）のみを残し、外枠は持たないレイアウトを前提にしている。
+function equalizePoolColumns(table, colL, colR){
+  const spans = table.querySelectorAll('td span.chip');
+  let maxWidth = 0;
+  spans.forEach(s => { maxWidth = Math.max(maxWidth, s.getBoundingClientRect().width); });
+  if (maxWidth === 0) return;
+  const sampleTd = table.querySelector('td');
+  if (!sampleTd) return;
+  const cs = getComputedStyle(sampleTd);
+  const extra = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0)
+              + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
+  const colWidth = Math.ceil(maxWidth + extra) + 2; // 詰め切ってしまわないよう少しだけ余白
+  table.style.tableLayout = 'fixed';
+  colL.style.width = colWidth + 'px';
+  colR.style.width = colWidth + 'px';
+}
+
+function render(){
+  // 上部固定バーの「配置先」表示をアクティブ行に同期させる
+  const activeRowLabel = document.getElementById('activeRowLabel');
+  if (activeRowLabel) activeRowLabel.textContent = '配置先: ' + (activeRow + 1) + '行目';
+
+  // pool：SkimView式の二列（要点語・所流語）表示。内枠（セル罫線）のみで外枠は持たない。
+  const pool = document.getElementById('pool');
+  pool.innerHTML = '';
+
+  const table = document.createElement('table');
+  table.style.borderCollapse = 'collapse';
+  const colgroup = document.createElement('colgroup');
+  const colL = document.createElement('col');
+  const colR = document.createElement('col');
+  colgroup.appendChild(colL); colgroup.appendChild(colR);
+  table.appendChild(colgroup);
+  const tbody2 = document.createElement('tbody');
+  let currentRow = null;
+  chips.forEach(c => {
+    const type = classify(c);
+    if (type === 'keyword' || !currentRow || currentRow.rightFilled){
+      currentRow = { tr: document.createElement('tr'), rightFilled: false };
+      const tdL = document.createElement('td');
+      tdL.style.cssText = 'text-align:right;border:1px solid #ddd;padding:4px 10px;';
+      const tdR = document.createElement('td');
+      tdR.style.cssText = 'text-align:left;border:1px solid #ddd;padding:4px 10px;';
+      currentRow.tdL = tdL; currentRow.tdR = tdR;
+      currentRow.tr.appendChild(tdL); currentRow.tr.appendChild(tdR);
+      tbody2.appendChild(currentRow.tr);
+      if (type === 'keyword'){
+        tdL.appendChild(makeChipEl(c, 'chip', 'keyword'));
+        tdL.addEventListener('click', () => toggleSelect(c.id));
+      } else {
+        tdR.appendChild(makeChipEl(c, 'chip', 'satellite'));
+        tdR.addEventListener('click', () => toggleSelect(c.id));
+        currentRow.rightFilled = true;
+      }
+    } else {
+      currentRow.tdR.appendChild(makeChipEl(c, 'chip', 'satellite'));
+      currentRow.tdR.addEventListener('click', () => toggleSelect(c.id));
+      currentRow.rightFilled = true;
+    }
+  });
+  table.appendChild(tbody2);
+  pool.appendChild(table);
+  equalizePoolColumns(table, colL, colR);
+
+  // table (SVOCM本体)
+  const cols = viewCols();
+  const thead = document.getElementById('thead');
+  thead.innerHTML = '<tr><th class="rownum">#</th>' +
+    cols.map(c => '<th>' + (c === 'SOC' ? 'S/O/C' : c) + '</th>').join('') + '</tr>';
+
+  // 配置バーのボタンと表示モードのラジオを現在のモードに合わせる
+  document.getElementById('btns5').style.display = (viewMode === '5') ? '' : 'none';
+  document.getElementById('btns3').style.display = (viewMode === '3') ? '' : 'none';
+  const modeRadio = document.querySelector('input[name="viewMode"][value="' + viewMode + '"]');
+  if (modeRadio) modeRadio.checked = true;
+
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  rows.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    if (i === activeRow) tr.className = 'active';
+
+    const tdNum = document.createElement('td');
+    tdNum.className = 'rownum';
+    tdNum.setAttribute('data-label', '#');
+    tdNum.textContent = i + 1;
+    tr.appendChild(tdNum);
+
+    cols.forEach(viewCol => {
+      const td = document.createElement('td');
+      td.className = 'cell';
+      td.setAttribute('data-label', viewCol === 'SOC' ? 'S/O/C' : viewCol);
+      td.addEventListener('click', () => onCellClick(i, viewCol));
+
+      rolesOfViewCol(viewCol).forEach(role => {
+        row[role].forEach(ch => { td.appendChild(makeChipEl(ch, 'cellword')); });
+      });
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+render();
+
+// 画面幅変更(端末回転含む)時、ブレークポイントでフォントサイズが変わるため
+// 単語置き場の列幅を再計算する(render()の再実行で足りる)。
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(render, 150);
+});
+
+/* ---------- 記録の保存・別タブ表示・PC保存/読み込み ---------- */
+
+const LS_SAVED = "svocm_saved_v1";
+
+function pad2(n){ return String(n).padStart(2, "0"); }
+function formatDayKey(d){ return d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate()); }
+
+function loadSaved(){
+  try { const raw = localStorage.getItem(LS_SAVED); return raw ? JSON.parse(raw) : []; }
+  catch(e){ return []; }
+}
+function saveSavedList(arr){
+  try { localStorage.setItem(LS_SAVED, JSON.stringify(arr)); } catch(e){}
+}
+
+// 現在のS/V/O/C/M表を、語を動かせない静的な図として保存する
+function saveCurrentTable(){
+  const hasContent = rows.some(r => COLS.some(c => r[c].length > 0));
+  if (!hasContent) return;
+  const now = new Date();
+  const dayKey = formatDayKey(now);
+  const snapshotRows = rows.map(r => {
+    const o = {};
+    COLS.forEach(c => { o[c] = r[c].map(ch => ch.text); });
+    return o;
+  }).filter(r => COLS.some(c => r[c].length > 0));
+
+  const saved = loadSaved();
+  const record = {
+    id: "s_" + now.getTime() + "_" + Math.random().toString(36).slice(2,8),
+    ts: now.getTime(),
+    dayKey: dayKey,
+    sentence: document.getElementById('input').value.trim(),
+    mode: viewMode,   // 保存時の表示形式（'5' または '3'）
+    rows: snapshotRows
+  };
+  saved.push(record);
+  saveSavedList(saved);
+
+  const status = document.getElementById('saveStatus');
+  status.style.opacity = 1;
+  setTimeout(() => { status.style.opacity = 0; }, 1500);
+}
+
+// 別タブ(window.open)は、ファイルをローカルで直接開いている場合(file://)や
+// スマホのブラウザで、クエリ付きURLへのポップアップが失敗する/ブロックされる
+// ことがあるため使わない。同じページ内で表示を切り替える方式にする。
+function showArchive(){
+  document.getElementById('editorRoot').style.display = 'none';
+  document.getElementById('archiveRoot').style.display = 'block';
+  renderArchive();
+}
+function hideArchive(){
+  document.getElementById('archiveRoot').style.display = 'none';
+  document.getElementById('editorRoot').style.display = 'block';
+}
+
+// 保存済みの表を、編集不可の静的な図（テーブル）として描画する
+// mode省略時は従来通り5列（過去に保存した記録との互換のため）
+function renderStaticTable(recordRows, mode){
+  const cols = (mode === '3') ? ['SOC','V','M'] : COLS.slice();
+  const t = document.createElement('table');
+  // 表の幅は内容(文字量)に合わせて自動で決まるようにし、無駄に広がらないようにする。
+  // 表ごとに幅が異なってよいので、%指定はせず、代わりにmargin:0 autoで中央寄せする。
+  t.style.width = 'auto';
+  t.style.margin = '0 auto';
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th class="rownum">#</th>' +
+    cols.map(c => '<th>' + (c === 'SOC' ? 'S/O/C' : c) + '</th>').join('') + '</tr>';
+  t.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  recordRows.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    const tdNum = document.createElement('td');
+    tdNum.className = 'rownum';
+    tdNum.setAttribute('data-label', '#');
+    tdNum.textContent = i+1;
+    tr.appendChild(tdNum);
+    cols.forEach(col => {
+      const td = document.createElement('td');
+      td.style.textAlign = 'center';
+      td.setAttribute('data-label', col === 'SOC' ? 'S/O/C' : col);
+      const roles = (col === 'SOC') ? ['S','O','C'] : [col];
+      td.textContent = roles.map(role => (r[role] || []).join(' ')).filter(s => s !== '').join(' ');
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  t.appendChild(tbody);
+  return t;
+}
+
+function recordToTSV(record){
+  const cols = (record.mode === '3') ? ['SOC','V','M'] : COLS.slice();
+  const cellText = (r, col) => {
+    const roles = (col === 'SOC') ? ['S','O','C'] : [col];
+    return roles.map(role => (r[role] || []).join(' ')).filter(s => s !== '').join(' ');
+  };
+  const header = ['#', ...cols.map(c => c === 'SOC' ? 'S/O/C' : c)].join('\t');
+  const body = record.rows.map((r,i) => [i+1, ...cols.map(c => cellText(r, c))].join('\t')).join('\n');
+  return header + '\n' + body;
+}
+
+function copyRecordTSV(id){
+  const record = loadSaved().find(r => r.id === id);
+  if (!record) return;
+  navigator.clipboard.writeText(recordToTSV(record));
+}
+
+function deleteRecord(id){
+  const ok = confirm("この記録を削除します。元に戻せません。よろしいですか？");
+  if (!ok) return;
+  saveSavedList(loadSaved().filter(r => r.id !== id));
+  renderArchive();
+}
+
+function renderArchive(){
+  const container = document.getElementById('archiveList');
+  if (!container) return;
+  const saved = loadSaved().slice().sort((a,b) => b.ts - a.ts);
+  if (saved.length === 0){
+    container.innerHTML = '<p style="color:#888;">まだ保存された表はありません。</p>';
+    return;
+  }
+  // 各記録の「その日の何個目/その日の総数」を計算
+  const dayTotals = {};
+  saved.forEach(r => { dayTotals[r.dayKey] = (dayTotals[r.dayKey] || 0) + 1; });
+  const dayCounters = {};
+  // 古い順に番号を振るため、時系列順に並べ直して計算
+  const chronological = saved.slice().sort((a,b) => a.ts - b.ts);
+  const dayIndexOf = {};
+  chronological.forEach(r => {
+    dayCounters[r.dayKey] = (dayCounters[r.dayKey] || 0) + 1;
+    dayIndexOf[r.id] = dayCounters[r.dayKey];
+  });
+
+  container.innerHTML = '';
+  saved.forEach(r => {
+    const d = new Date(r.ts);
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'padding-bottom:24px;margin-bottom:24px;border-bottom:1px dashed #ccc;';
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
+    const label = document.createElement('div');
+    label.style.cssText = 'font-size:13px;color:#666;';
+    label.textContent = `${r.dayKey}（${pad2(d.getHours())}:${pad2(d.getMinutes())}） — ${dayIndexOf[r.id]}/${dayTotals[r.dayKey]}`;
+    const btns = document.createElement('div');
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = 'Excel用にコピー';
+    copyBtn.onclick = () => copyRecordTSV(r.id);
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '削除';
+    delBtn.style.marginLeft = '6px';
+    delBtn.onclick = () => deleteRecord(r.id);
+    btns.appendChild(copyBtn); btns.appendChild(delBtn);
+    header.appendChild(label); header.appendChild(btns);
+    wrapper.appendChild(header);
+    if (r.sentence){
+      const sent = document.createElement('div');
+      sent.style.cssText = 'font-size:13px;color:#888;margin-bottom:6px;';
+      sent.textContent = r.sentence;
+      wrapper.appendChild(sent);
+    }
+    // 表は一続きのまま(縦積みカードなどに分割しない)、幅が画面に収まらない場合のみ
+    // その表単体を横スクロールできるようにする。
+    const scrollWrap = document.createElement('div');
+    scrollWrap.className = 'table-scroll';
+    scrollWrap.appendChild(renderStaticTable(r.rows, r.mode));
+    wrapper.appendChild(scrollWrap);
+    container.appendChild(wrapper);
+  });
+}
+
+// PCへのファイル保存（ダウンロード）
+function exportToPC(){
+  const saved = loadSaved();
+  const blob = new Blob([JSON.stringify(saved, null, 2)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const now = new Date();
+  a.href = url;
+  a.download = 'svocm_saved_' + formatDayKey(now) + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// PCからのファイル読み込み（既存の記録に追加する）
+function importFromPC(ev){
+  const file = ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const imported = JSON.parse(reader.result);
+      if (!Array.isArray(imported)) throw new Error('形式が不正です');
+      const existing = loadSaved();
+      const existingIds = new Set(existing.map(r => r.id));
+      const merged = existing.concat(imported.filter(r => !existingIds.has(r.id)));
+      saveSavedList(merged);
+      if (document.getElementById('archiveList')) renderArchive();
+      alert('読み込みました（' + imported.length + '件）');
+    } catch(e){
+      alert('読み込みに失敗しました: ' + e.message);
+    }
+  };
+  reader.readAsText(file);
+  ev.target.value = '';
+}
+
+/* ---------- 起動振り分け ---------- */
+// 以前はURLの?view=archiveで別タブ表示を切り替えていたが、file://環境や
+// スマホのブラウザでポップアップが失敗するため廃止。常にeditorRootから開始する。
+</script>
+</body>
+</html>
